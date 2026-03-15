@@ -106,3 +106,33 @@ def test_search_response_debug_flag_controls_explainability():
     assert "debug" not in without_debug["results"][0]
     assert "debug" in with_debug["results"][0]
     assert "bm25" in with_debug["results"][0]["debug"]
+
+
+def test_replacing_document_rebuilds_postings_without_stale_tokens():
+    index = InvertedIndex()
+    index.add_document(_doc("same", title="alpha", content="alpha"))
+    index.add_document(_doc("same", title="beta", content="beta"))
+
+    assert index.search("alpha") == []
+    assert index.search("beta")[0].doc_id == "same"
+
+
+def test_authority_and_recency_support_alternative_metadata_shapes():
+    now = datetime.now(UTC)
+    index = InvertedIndex()
+    index.add_document(
+        IndexedDocument(
+            doc_id="alt-shape",
+            url="https://example.com/path",
+            title="ranking signals",
+            content="ranking signals",
+            metadata={
+                "crawled_at": now.timestamp(),
+                "host_level_score": 0.9,
+            },
+        )
+    )
+
+    result = index.search("ranking", debug=True)[0]
+    assert result.debug["recency_prior"] > 0
+    assert result.debug["authority_prior"] > 0

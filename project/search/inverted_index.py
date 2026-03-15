@@ -51,6 +51,16 @@ class InvertedIndex:
     def add_document(self, doc: IndexedDocument) -> None:
         """Add or replace a document in the index."""
 
+        existing_counts = self._token_freqs.get(doc.doc_id)
+        if existing_counts is not None:
+            for token in existing_counts:
+                posting = self._postings.get(token)
+                if posting is None:
+                    continue
+                posting.discard(doc.doc_id)
+                if not posting:
+                    self._postings.pop(token, None)
+
         self._docs[doc.doc_id] = doc
         combined_tokens = self._combined_tokens(doc)
         counts = Counter(combined_tokens)
@@ -67,9 +77,12 @@ class InvertedIndex:
         if not query_tokens:
             return []
 
+        if limit <= 0:
+            return []
+
         candidates = self._retrieve(query_tokens)
         ranked = [self._rank(doc_id, query_tokens, debug=debug) for doc_id in candidates]
-        ranked.sort(key=lambda result: result.score, reverse=True)
+        ranked.sort(key=lambda result: (-result.score, result.doc_id))
         return ranked[:limit]
 
     def search_response(self, query: str, *, limit: int = 10, debug: bool = False) -> dict[str, Any]:
@@ -178,7 +191,7 @@ class InvertedIndex:
     def _authority_prior(self, doc: IndexedDocument) -> float:
         if not doc.metadata:
             return 0.0
-        score = doc.metadata.get("host_score", 0.0)
+        score = doc.metadata.get("host_score", doc.metadata.get("host_level_score", 0.0))
         if not isinstance(score, int | float):
             return 0.0
         return max(min(float(score), 1.0), 0.0) * 0.5
@@ -204,6 +217,8 @@ def _url_slug_and_path(url: str) -> str:
 def _parse_datetime(value: Any) -> datetime | None:
     if isinstance(value, datetime):
         dt = value
+    elif isinstance(value, int | float):
+        dt = datetime.fromtimestamp(float(value), tz=UTC)
     elif isinstance(value, str):
         normalized = value.replace("Z", "+00:00")
         try:
