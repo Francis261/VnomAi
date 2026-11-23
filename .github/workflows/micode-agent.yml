@@ -1,0 +1,69 @@
+name: MiCode Agent Runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      session_id:
+        description: MiCode session identifier
+        required: true
+        type: string
+      handoff_minutes:
+        description: Runtime handoff interval in minutes
+        required: false
+        default: '270'
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: micode-agent-${{ github.repository }}-${{ inputs.session_id }}
+  cancel-in-progress: false
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Configure Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Cloudflare Quick Tunnel client
+        run: |
+          set -euo pipefail
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /tmp/cloudflared
+          sudo install -m 0755 /tmp/cloudflared /usr/local/bin/cloudflared
+          cloudflared --version
+
+      - name: Prepare runtime state
+        env:
+          MICODE_SESSION_ID: ${{ inputs.session_id }}
+        run: node MiCode/runtime/prepare.js
+
+      - name: Start renewable MiCode runtime
+        env:
+          MICODE_SESSION_ID: ${{ inputs.session_id }}
+          MICODE_HANDOFF_MINUTES: ${{ inputs.handoff_minutes }}
+          MICODE_CALLBACK_URL: ${{ secrets.MICODE_CONTROL_PLANE_URL }}
+          MICODE_CALLBACK_TOKEN: ${{ secrets.MICODE_RUNNER_CALLBACK_TOKEN }}
+          MICODE_AGENT_TOKEN: ${{ secrets.MICODE_AGENT_TOKEN }}
+          AI_BASE_URL: ${{ secrets.MICODE_AI_BASE_URL }}
+          AI_API_KEY: ${{ secrets.MICODE_AI_API_KEY }}
+          AI_MODEL: ${{ vars.MICODE_AI_MODEL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: node MiCode/runtime/runner.js
